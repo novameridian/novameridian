@@ -4,7 +4,7 @@
  */
 export const SITE_NAME = "Nova Meridian"
 export const SITE_TAGLINE = "A New Direction for Your Financial Future."
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://www.novameridian.online").replace(/\/$/, "")
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://novameridian.online").replace(/\/$/, "")
 export const SUPPORT_EMAIL = "support@novameridian.online"
 export const TELEGRAM_HANDLE = "Nova_Meridian_Bot"
 export const TELEGRAM_URL = `https://t.me/${TELEGRAM_HANDLE}`
