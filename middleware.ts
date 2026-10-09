@@ -1,20 +1,23 @@
-import { NextResponse, type NextRequest } from "next/server"
-import { createServerClient } from "@supabase/ssr"
+import { NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
 
-export async function middleware(req: NextRequest) {
-  let response = NextResponse.next({ request: req })
+export async function middleware(req: any) {
   const url = req.nextUrl.clone()
   const pathname = url.pathname
 
-  // 1. Force HTTPS / WWW redirect in production
+  // Force HTTPS and WWW redirect for production mapping
   if (process.env.NODE_ENV === "production") {
-    const host = req.headers.get("host") || ""
+    const host = req.headers.get("host") || "";
+    
+    // If the host doesn't start with www., or the request protocol isn't secure https
     if (!host.startsWith("www.") || req.headers.get("x-forwarded-proto") !== "https") {
-      return NextResponse.redirect(`https://www.novameridian.online${pathname}`, 301)
+      return NextResponse.redirect(`https://www.novameridian.online${pathname}`, 301); 
+      // Note: 301 is a permanent redirect, which explicitly forces Google to update its layout index
     }
   }
 
-  // 2. SEO & Static Exclusions
+  // 1. CRITICAL SEO EXCLUSIONS: Always allow Google to read these structural files,
+  // even if maintenance mode is enabled. Otherwise, Google drops your site index.
   const isSitemap = pathname === "/sitemap.xml"
   const isRobots = pathname === "/robots.txt"
   const isFavicon = pathname === "/favicon.ico"
@@ -23,20 +26,21 @@ export async function middleware(req: NextRequest) {
   const isMaintenancePage = pathname === "/maintenance"
 
   if (isApi || isStatic || isSitemap || isRobots || isFavicon) {
-    return response
+    return NextResponse.next()
   }
 
-  // 3. System Settings Check
+  // 2. Fetch system settings safely with a timeout fallback
   const url_from_env = process.env.NEXT_PUBLIC_SITE_URL
   let settings = null
-
+  
   try {
+    // Added a 3-second abort timeout so your middleware never hangs the site if the API is slow
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 3000)
 
     const res = await fetch(`${url_from_env}/api/settings`, {
       signal: controller.signal,
-      next: { revalidate: 10 }
+      next: { revalidate: 10 } // Cache for 10 seconds so it doesn't slow down user requests
     })
     
     clearTimeout(timeoutId)
@@ -46,6 +50,12 @@ export async function middleware(req: NextRequest) {
   }
 
   const maintenanceEnabled = settings?.maintenance_mode === true
+
+  // -----------------------------------------------------------------
+  // PERFORMANCE OPTIMIZATION FOR GOOGLE (When Maintenance is OFF)
+  // -----------------------------------------------------------------
+  // If maintenance is completely OFF and someone is visiting a public page,
+  // let them pass immediately. Do not hit Supabase. This keeps Google lightning fast.
   const publicRoutes = ["/", "/about", "/contact", "/faq", "/security"]
   const isPublicRoute = publicRoutes.includes(pathname)
 
@@ -55,34 +65,13 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url)
     }
     if (isPublicRoute) {
-      return response
+      return NextResponse.next()
     }
   }
 
-  // 4. Instantiate Supabase Client (Correct approach for middleware)
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return response
-  }
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return req.cookies.getAll()
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
-        response = NextResponse.next({ request: req })
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options)
-        )
-      },
-    },
-  })
-
-  // 5. Auth & Role Verification
+  // 3. AUTH & PROFILE CHECK
+  // This runs for all dashboard routes, or when maintenance mode is active
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   let isAdmin = false
@@ -97,15 +86,19 @@ export async function middleware(req: NextRequest) {
     isAdmin = role === "admin" || role === "super_admin"
   }
 
+  // -----------------------------
+  // CASE 1: Maintenance ON
+  // -----------------------------
+  // Redirects absolutely everything to /maintenance unless you are an admin
   if (maintenanceEnabled && !isAdmin) {
     if (!isMaintenancePage) {
       url.pathname = "/maintenance"
       return NextResponse.redirect(url)
     }
-    return response
+    return NextResponse.next()
   }
 
-  return response
+  return NextResponse.next()
 }
 
 export const config = {
