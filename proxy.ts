@@ -4,14 +4,6 @@ import { createServerClient } from "@supabase/ssr"
 export async function proxy(req: NextRequest) {
   const url = req.nextUrl.clone()
   const { pathname } = url
-  
-  // Force HTTPS and WWW redirect for production mapping
-  if (process.env.NODE_ENV === "production") {
-    const host = req.headers.get("host") || "";
-    if (!host.startsWith("www.") || req.headers.get("x-forwarded-proto") !== "https") {
-      return NextResponse.redirect(`https://www.novameridian.online${pathname}`, 301);
-    }
-  }
 
   if (
     pathname.startsWith("/api") || pathname.startsWith("/_next") ||
